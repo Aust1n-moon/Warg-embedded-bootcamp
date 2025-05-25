@@ -19,6 +19,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -29,11 +31,15 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define ADC_BYTE_SIZE 3
+#define ADC_MAX 1023 //10 bits
+#define MIN_DUTY_CYCLE 3200 //5% duty cycle
+#define MAX_DUTY_CYCLE 6400 //10% duty cycle
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,13 +50,34 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+extern SPI_HandleTypeDef hspi1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+static uint16_t Read_ADC(void);
 /* USER CODE BEGIN PFP */
 
+uint16_t Read_ADC(void)
+{
+	//pulling cs low
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+
+	//reading the bits: 0x01 - start bit, 0x80 - CH0, 0x00 - dummy bit
+	uint8_t tx_buffer[ADC_BYTE_SIZE] = {0x01,0x80,0x00};
+	uint8_t rx_buffer[ADC_BYTE_SIZE] ={0};
+
+	//trasmits from tx_buffer and receives to rx_buffer
+	HAL_SPI_TransmitReceive(&hspi1, tx_buffer, rx_buffer, ADC_BYTE_SIZE, 10);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+
+	//returning the extracted data
+	uint16_t data_high = rx_buffer[1] & 0x03;
+	uint16_t data_low = rx_buffer[2];
+
+	int data = (data_high << 8) | data_low;
+	return data;
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -87,7 +114,10 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_SPI1_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
 
   /* USER CODE END 2 */
 
@@ -95,7 +125,16 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  //start ADC conversation
+	  uint16_t ADC_Value = Read_ADC();
+
+	  //ADC data to PWM duty cycle
+	  uint16_t PWM_Pulse = MIN_DUTY_CYCLE + ((ADC_Value * (MAX_DUTY_CYCLE - MIN_DUTY_CYCLE) / ADC_MAX));
+
+	  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, PWM_Pulse);
+	  HAL_Delay(10);
     /* USER CODE END WHILE */
+
 
     /* USER CODE BEGIN 3 */
   }
@@ -122,6 +161,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
@@ -177,5 +217,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
